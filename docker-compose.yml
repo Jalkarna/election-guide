@@ -1,0 +1,13 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:////data/election_guide.db
+      - PORT=8080
+    restart: unless-stopped
