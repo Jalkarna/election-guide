@@ -7,8 +7,9 @@ import shutil
 import json
 import logging
 import httpx
-from typing import List
+import io
 from bs4 import BeautifulSoup
+from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
 
@@ -100,9 +101,6 @@ def search(query: str) -> str:
         return json.dumps({"results": [], "error": f"Search failed: {str(e)}"})
 
 
-import io
-from pypdf import PdfReader
-
 def fetch_url(url: str) -> str:
     """
     Fetch and extract readable text content from a web page URL or PDF file.
@@ -169,45 +167,6 @@ def fetch_url(url: str) -> str:
         return f"Could not fetch {url}: {str(e)}"
 
 
-def render_timeline(steps: List[dict]) -> str:
-    """
-    Render a visual election process timeline in the UI.
-    Call this tool whenever explaining a multi-phase election process,
-    voter registration steps, candidature filing procedure, election schedule,
-    or any sequential civic process that has 3 or more steps.
-    The frontend will display this as a beautiful visual stepper component.
-
-    Args:
-        steps: List of step dictionaries, each containing:
-               - phase: Phase number or label (e.g., "Phase 1", "Step A")
-               - title: Short title for this step
-               - description: Detailed explanation of what happens in this step
-               - date_or_duration: Specific date, deadline, or time duration
-
-    Returns:
-        JSON string with status and validated steps for frontend rendering.
-    """
-    try:
-        # Validate steps format
-        validated = []
-        for step in steps:
-            if isinstance(step, dict):
-                validated.append({
-                    "phase": str(step.get("phase", "")),
-                    "title": str(step.get("title", "")),
-                    "description": str(step.get("description", "")),
-                    "date_or_duration": str(step.get("date_or_duration", ""))
-                })
-        if not validated:
-            logger.warning("render_timeline called with no valid steps")
-            return json.dumps({"status": "error", "error": "No valid steps provided"})
-        logger.info(f"render_timeline: {len(validated)} steps")
-        return json.dumps({"status": "timeline_rendered", "steps": validated})
-    except Exception as e:
-        logger.error(f"render_timeline error: {e}")
-        return json.dumps({"status": "error", "error": str(e)})
-
-
 def get_election_schedule() -> str:
     """
     Fetch the current and upcoming election schedule from the Election Commission
@@ -236,5 +195,4 @@ def get_election_schedule() -> str:
     return "Unable to fetch current election schedule. Please visit https://eci.gov.in for the latest information."
 
 
-# Export all tools as a list of callable functions
-TOOLS = [search, fetch_url, render_timeline, get_election_schedule]
+TOOLS = [search, fetch_url, get_election_schedule]

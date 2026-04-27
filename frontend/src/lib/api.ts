@@ -1,4 +1,5 @@
 import { BACKEND_URL } from "./config"
+import type { UiCopy } from "./i18n"
 
 export interface Session {
   id: string
@@ -14,6 +15,7 @@ export interface ChatMessage {
   thinking_content: string | null
   tool_calls: Record<string, unknown> | null
   sources: string[] | null
+  worked_ms: number | null
   created_at: string
 }
 
@@ -42,4 +44,14 @@ export async function getSession(id: string): Promise<SessionDetail> {
 export async function deleteSession(id: string): Promise<void> {
   const res = await fetch(`${BACKEND_URL}/api/chat/sessions/${id}`, { method: "DELETE" })
   if (!res.ok) throw new Error("Failed to delete session")
+}
+
+export async function translateUiCopy(language: string, messages: UiCopy): Promise<Partial<UiCopy>> {
+  const res = await fetch(`${BACKEND_URL}/api/i18n/translate-ui`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ language, messages }),
+  })
+  if (!res.ok) throw new Error("Failed to translate UI")
+  return res.json()
 }

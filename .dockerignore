@@ -1,8 +1,11 @@
 .git
 .gitignore
+.codex
+.playwright-mcp
+.vscode
 .DS_Store
 node_modules
-package-lock.json
+/package-lock.json
 frontend/node_modules
 frontend/.next
 frontend/tsconfig.tsbuildinfo

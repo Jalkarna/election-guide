@@ -5,13 +5,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import String, Text, DateTime, ForeignKey, JSON
+from config import settings
+from sqlalchemy import String, Text, DateTime, ForeignKey, JSON, Integer, text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
-DATABASE_URL = "sqlite+aiosqlite:///./election_guide.db"
-
-engine = create_async_engine(DATABASE_URL, echo=False)
+engine = create_async_engine(settings.database_url, echo=False)
 AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -44,6 +43,7 @@ class Message(Base):
     thinking_content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     tool_calls: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     sources: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    worked_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     session: Mapped["Session"] = relationship("Session", back_populates="messages")
@@ -52,6 +52,10 @@ class Message(Base):
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        columns = await conn.execute(text("PRAGMA table_info(messages)"))
+        column_names = {row[1] for row in columns}
+        if "worked_ms" not in column_names:
+            await conn.execute(text("ALTER TABLE messages ADD COLUMN worked_ms INTEGER"))
 
 
 async def get_db():

@@ -3,7 +3,7 @@ steps:
     args:
       - build
       - -t
-      - us-central1-docker.pkg.dev/$PROJECT_ID/election-guide/app:$COMMIT_SHA
+      - us-central1-docker.pkg.dev/$PROJECT_ID/election-guide/app:$BUILD_ID
       - -t
       - us-central1-docker.pkg.dev/$PROJECT_ID/election-guide/app:latest
       - .
@@ -15,12 +15,18 @@ steps:
       - us-central1-docker.pkg.dev/$PROJECT_ID/election-guide/app
 
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: bash
+    args:
+      - -c
+      - gcloud storage buckets describe gs://election-guide-data-$PROJECT_ID || gcloud storage buckets create gs://election-guide-data-$PROJECT_ID --location=us-central1
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
     args:
       - run
       - deploy
       - election-guide
-      - --image=us-central1-docker.pkg.dev/$PROJECT_ID/election-guide/app:$COMMIT_SHA
+      - --image=us-central1-docker.pkg.dev/$PROJECT_ID/election-guide/app:$BUILD_ID
       - --region=us-central1
       - --platform=managed
       - --allow-unauthenticated
@@ -30,7 +36,10 @@ steps:
       - --max-instances=3
       - --port=8080
       - --timeout=300
-      - --set-env-vars=DATABASE_URL=sqlite+aiosqlite:////data/election_guide.db,GCP_PROJECT_ID=gen-lang-client-0014714910,GCP_LOCATION=us-central1
+      - --execution-environment=gen2
+      - --add-volume=name=election-data,type=cloud-storage,bucket=election-guide-data-$PROJECT_ID
+      - --add-volume-mount=volume=election-data,mount-path=/data
+      - --set-env-vars=DATABASE_URL=sqlite+aiosqlite:////data/election_guide.db,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=us-central1
       - --set-secrets=GOOGLE_API_KEY=GOOGLE_API_KEY:latest
 
 images:

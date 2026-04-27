@@ -1,9 +1,27 @@
 "use client"
 
 import * as React from "react"
-import { motion, AnimatePresence } from "framer-motion"
-import { ChevronRight, Search, Globe, CalendarRange } from "lucide-react"
+import {
+  CalendarRange,
+  FileText,
+  Globe,
+  Loader2,
+  Search,
+} from "lucide-react"
 import ReactMarkdown from "react-markdown"
+import {
+  formatCopy,
+  UI_COPY,
+  type UiCopy,
+} from "@/lib/i18n"
+import {
+  ChainOfThought,
+  ChainOfThoughtContent,
+  ChainOfThoughtHeader,
+  ChainOfThoughtSearchResult,
+  ChainOfThoughtSearchResults,
+  ChainOfThoughtStep,
+} from "@/components/ai-elements/chain-of-thought"
 import { cn } from "@/lib/utils"
 
 interface ToolCall {
@@ -19,22 +37,28 @@ interface ThinkingBlockProps {
   isStreaming: boolean
   hasResponse: boolean
   workedForMs?: number
+  labels?: Pick<
+    UiCopy,
+    | "working"
+    | "reasoned"
+    | "reasonedFor"
+    | "preparingAnswer"
+    | "searchingPrefix"
+    | "readingPrefix"
+    | "fetchingSchedule"
+    | "searchResults"
+    | "schedule"
+  >
 }
 
-const TOOL_ICON: Record<string, React.ReactNode> = {
-  search:                <Search className="h-3 w-3" />,
-  fetch_url:             <Globe className="h-3 w-3" />,
-  get_election_schedule: <CalendarRange className="h-3 w-3" />,
-  render_timeline:       <CalendarRange className="h-3 w-3" />,
-}
+const TOOL_ICON = {
+  search: Search,
+  fetch_url: Globe,
+  get_election_schedule: CalendarRange,
+} as const
 
-function toolLabel(tool: ToolCall): string {
-  const { name, args } = tool
-  if (name === "search")               return `${String(args.query ?? "").slice(0, 55)}`
-  if (name === "fetch_url")            return `${String(args.url ?? "").replace(/^https?:\/\//, "").slice(0, 50)}`
-  if (name === "get_election_schedule") return "election schedule"
-  if (name === "render_timeline")      return "building timeline"
-  return name
+function BlinkText({ text, className }: { text: string; className?: string }) {
+  return <span className={cn("blink-text", className)}>{text}</span>
 }
 
 function formatDuration(ms: number): string {
@@ -45,19 +69,103 @@ function formatDuration(ms: number): string {
 }
 
 type Segment = { kind: "text"; text: string } | { kind: "tool"; toolId: string }
+type DetailItem = Segment | { kind: "orphanTool"; tool: ToolCall } | { kind: "status" }
 
 function parseSegments(content: string): Segment[] {
   const segs: Segment[] = []
   const parts = content.split(/\[TOOL_CALL:([^\]]+)\]/)
   for (let i = 0; i < parts.length; i++) {
     if (i % 2 === 0) {
-      const t = parts[i].replace(/^\n+/, "").replace(/\n+$/, "")
-      if (t) segs.push({ kind: "text", text: t })
+      const text = parts[i].replace(/^\n+/, "").replace(/\n+$/, "")
+      if (text) segs.push({ kind: "text", text })
     } else {
       segs.push({ kind: "tool", toolId: parts[i] })
     }
   }
   return segs
+}
+
+function toolLabel(tool: ToolCall, labels: NonNullable<ThinkingBlockProps["labels"]>): string {
+  const { name, args } = tool
+  if (name === "search") {
+    return formatCopy(labels.searchingPrefix, { query: String(args.query ?? "").slice(0, 80) })
+  }
+  if (name === "fetch_url") {
+    return formatCopy(labels.readingPrefix, {
+      url: String(args.url ?? "").replace(/^https?:\/\//, "").slice(0, 80),
+    })
+  }
+  if (name === "get_election_schedule") return labels.fetchingSchedule
+  return name
+}
+
+function resultBadges(tool: ToolCall, labels: NonNullable<ThinkingBlockProps["labels"]>): string[] {
+  if (tool.name === "search") return [labels.searchResults]
+  if (tool.name === "fetch_url") {
+    const url = String(tool.args.url ?? "")
+    if (!url) return []
+    try {
+      return [new URL(url).hostname]
+    } catch {
+      return [url.replace(/^https?:\/\//, "").split("/")[0]].filter(Boolean)
+    }
+  }
+  if (tool.name === "get_election_schedule") return [labels.schedule]
+  return []
+}
+
+function ReasoningText({ text }: { text: string }) {
+  return (
+    <div className="thinking-prose text-xs leading-relaxed text-muted-foreground/80">
+      <ReactMarkdown
+        components={{
+          p: ({ children }) => <p className="mb-1.5 last:mb-0">{children}</p>,
+          strong: ({ children }) => (
+            <strong className="font-semibold text-muted-foreground">{children}</strong>
+          ),
+          em: ({ children }) => <em className="italic">{children}</em>,
+          h1: ({ children }) => <p className="mb-1.5 font-semibold">{children}</p>,
+          h2: ({ children }) => <p className="mb-1.5 font-semibold">{children}</p>,
+          h3: ({ children }) => <p className="mb-1 font-medium">{children}</p>,
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
+function ToolStep({
+  tool,
+  showConnector,
+  labels,
+}: {
+  tool: ToolCall
+  showConnector?: boolean
+  labels: NonNullable<ThinkingBlockProps["labels"]>
+}) {
+  const Icon = TOOL_ICON[tool.name as keyof typeof TOOL_ICON] ?? Search
+  const badges = resultBadges(tool, labels)
+
+  return (
+    <ChainOfThoughtStep
+      icon={tool.done ? Icon : Loader2}
+      label={toolLabel(tool, labels)}
+      status={tool.done ? "complete" : "active"}
+      showConnector={showConnector}
+      className={!tool.done ? "[&_svg]:animate-spin" : undefined}
+    >
+      {tool.done && badges.length > 0 && (
+        <ChainOfThoughtSearchResults>
+          {badges.map((badge) => (
+            <ChainOfThoughtSearchResult key={badge}>
+              {badge}
+            </ChainOfThoughtSearchResult>
+          ))}
+        </ChainOfThoughtSearchResults>
+      )}
+    </ChainOfThoughtStep>
+  )
 }
 
 export function ThinkingBlock({
@@ -66,197 +174,89 @@ export function ThinkingBlock({
   isStreaming,
   hasResponse,
   workedForMs,
+  labels = UI_COPY,
 }: ThinkingBlockProps) {
   const isDone = !isStreaming && hasResponse
-  const [expanded, setExpanded] = React.useState(isStreaming)
+  const [open, setOpen] = React.useState(isStreaming)
   const didCollapse = React.useRef(!isStreaming)
-
-  React.useEffect(() => {
-    if (isStreaming) {
-      setExpanded(true)
-      didCollapse.current = false
-    }
-  }, [isStreaming])
 
   React.useEffect(() => {
     if (isDone && !didCollapse.current) {
       didCollapse.current = true
-      const t = setTimeout(() => setExpanded(false), 700)
-      return () => clearTimeout(t)
+      const timeout = window.setTimeout(() => setOpen(false), 600)
+      return () => window.clearTimeout(timeout)
     }
   }, [isDone])
 
-  const tc = toolCalls ?? []
+  const tools = toolCalls ?? []
   const segs = parseSegments(content ?? "")
-  const orphans = tc.filter(t => !segs.some(s => s.kind === "tool" && s.toolId === t.id))
-
-  const isEmpty = segs.length === 0 && tc.length === 0
-
-  return (
-    <div className="flex flex-col gap-1">
-      {/* Header */}
-      <button
-        type="button"
-        onClick={() => setExpanded(v => !v)}
-        className={cn(
-          "group flex w-fit items-center gap-1.5 rounded-md px-1.5 py-0.5 transition-colors select-none",
-          "text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/30",
-        )}
-      >
-        {/* Animated thinking indicator */}
-        {isStreaming && !hasResponse ? (
-          <span className="flex items-center gap-[3px] mr-0.5">
-            {[0, 1, 2].map(i => (
-              <span
-                key={i}
-                className="inline-block h-1 w-1 rounded-full bg-[color:var(--saffron)]"
-                style={{
-                  animation: `thinking-dots 1.4s ease-in-out ${i * 0.16}s infinite`,
-                  animationFillMode: "both",
-                }}
-              />
-            ))}
-          </span>
-        ) : (
-          <span
-            className="mr-0.5 h-2 w-2 rounded-full border border-current opacity-60 shrink-0"
-            style={isDone && workedForMs != null ? {
-              background: "var(--saffron)",
-              borderColor: "var(--saffron)",
-              opacity: "0.7",
-            } : {}}
-          />
-        )}
-
-        <span
-          className="text-[11px] font-semibold tracking-wide"
-          style={{ fontFamily: "var(--font-syne, ui-sans-serif)" }}
-        >
-          {isDone && workedForMs != null
-            ? `Reasoned · ${formatDuration(workedForMs)}`
-            : isStreaming
-              ? "Thinking"
-              : "Reasoned"}
-        </span>
-
-        <ChevronRight
-          className={cn(
-            "h-3 w-3 opacity-50 transition-transform duration-200",
-            expanded && "rotate-90",
-          )}
-        />
-      </button>
-
-      {/* Expandable panel */}
-      <AnimatePresence initial={false}>
-        {expanded && (
-          <motion.div
-            key="thinking-panel"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.20, ease: [0.16, 1, 0.3, 1] }}
-            className="overflow-hidden"
-          >
-            <div className={cn(
-              "rounded-lg bg-muted/20 px-4 py-3",
-              "border-l-2 border-l-[color:var(--saffron)]/30",
-            )}>
-              {isEmpty ? (
-                /* Waiting for first tokens */
-                <div className="flex gap-1 py-1">
-                  {[0, 1, 2].map(i => (
-                    <motion.div
-                      key={i}
-                      className="h-1.5 w-1.5 rounded-full bg-[color:var(--saffron)]/40"
-                      animate={{ opacity: [0.2, 0.8, 0.2], scale: [0.8, 1, 0.8] }}
-                      transition={{ duration: 1.4, repeat: Infinity, delay: i * 0.22 }}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="flex flex-col gap-2.5">
-                  {segs.map((seg, i) => {
-                    if (seg.kind === "text") {
-                      return (
-                        <div
-                          key={i}
-                          className="thinking-prose text-[12px] leading-relaxed text-muted-foreground/65"
-                        >
-                          <ReactMarkdown
-                            components={{
-                              p: ({ children }) => (
-                                <p className="mb-1.5 last:mb-0">{children}</p>
-                              ),
-                              strong: ({ children }) => (
-                                <strong className="font-semibold not-italic text-muted-foreground/90">{children}</strong>
-                              ),
-                              h1: ({ children }) => (
-                                <p className="mb-1 font-semibold not-italic text-muted-foreground/80">{children}</p>
-                              ),
-                              h2: ({ children }) => (
-                                <p className="mb-1 font-semibold not-italic text-muted-foreground/80">{children}</p>
-                              ),
-                              h3: ({ children }) => (
-                                <p className="mb-1 font-medium not-italic text-muted-foreground/75">{children}</p>
-                              ),
-                            }}
-                          >
-                            {seg.text}
-                          </ReactMarkdown>
-                        </div>
-                      )
-                    }
-                    const tool = tc.find(t => t.id === seg.toolId)
-                    if (!tool) return null
-                    return <ToolChip key={tool.id} tool={tool} />
-                  })}
-                  {orphans.map(tool => (
-                    <ToolChip key={tool.id} tool={tool} />
-                  ))}
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+  const orphanTools = tools.filter(
+    (tool) => !segs.some((seg) => seg.kind === "tool" && seg.toolId === tool.id),
   )
-}
+  const realDetailItems: DetailItem[] = [
+    ...segs.filter((seg) => seg.kind === "text" || tools.some((tool) => tool.id === seg.toolId)),
+    ...orphanTools.map((tool) => ({ kind: "orphanTool" as const, tool })),
+  ]
+  const detailItems: DetailItem[] = realDetailItems.length > 0
+    ? realDetailItems
+    : isStreaming
+      ? [{ kind: "status" }]
+      : []
+  const hasDetails = detailItems.length > 0
 
-function ToolChip({ tool }: { tool: ToolCall }) {
+  const headerLabel = isDone && workedForMs != null
+    ? formatCopy(labels.reasonedFor, { duration: formatDuration(workedForMs) })
+    : isStreaming
+      ? labels.working
+      : labels.reasoned
+
   return (
-    <div className={cn(
-      "flex items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium",
-      "border border-border/50 bg-card/80",
-      "transition-colors duration-150",
-    )}>
-      <span className={cn(
-        "shrink-0 rounded p-0.5",
-        tool.done
-          ? "text-[color:var(--saffron)]/80"
-          : "text-muted-foreground/50",
-      )}>
-        {TOOL_ICON[tool.name] ?? <Search className="h-3 w-3" />}
-      </span>
+    <ChainOfThought
+      open={open}
+      onOpenChange={setOpen}
+      className="py-1"
+    >
+      <ChainOfThoughtHeader>
+        {isStreaming ? <BlinkText text={headerLabel} /> : headerLabel}
+      </ChainOfThoughtHeader>
+      {hasDetails && (
+        <ChainOfThoughtContent className="space-y-3 pb-1">
+          {detailItems.map((seg, index) => {
+            const showConnector = index < detailItems.length - 1
 
-      <span className="flex-1 truncate text-muted-foreground/80 font-mono text-[10.5px]">
-        {toolLabel(tool)}
-      </span>
+            if (seg.kind === "text") {
+              return (
+                <ChainOfThoughtStep
+                  key={`text-${index}`}
+                  icon={FileText}
+                  label={<ReasoningText text={seg.text} />}
+                  status={isStreaming && index === segs.length - 1 ? "active" : "complete"}
+                  showConnector={showConnector}
+                />
+              )
+            }
 
-      {tool.done ? (
-        <span className="shrink-0 text-[9px] font-bold text-emerald-500/60 tracking-wide">done</span>
-      ) : (
-        <span className="flex gap-[3px] shrink-0">
-          {[0, 1, 2].map(i => (
-            <span
-              key={i}
-              className="inline-block h-1 w-1 rounded-full bg-[color:var(--saffron)]/50"
-              style={{ animation: `thinking-dots 1.4s ease-in-out ${i * 0.16}s infinite` }}
-            />
-          ))}
-        </span>
+            if (seg.kind === "status") {
+              return (
+                <ChainOfThoughtStep
+                  key="status"
+                  icon={FileText}
+                  label={<span className="text-muted-foreground/80">{labels.preparingAnswer}</span>}
+                  status="active"
+                  showConnector={false}
+                />
+              )
+            }
+
+            if (seg.kind === "orphanTool") {
+              return <ToolStep key={seg.tool.id} tool={seg.tool} showConnector={showConnector} labels={labels} />
+            }
+
+            const tool = tools.find((item) => item.id === seg.toolId)
+            return tool ? <ToolStep key={tool.id} tool={tool} showConnector={showConnector} labels={labels} /> : null
+          })}
+        </ChainOfThoughtContent>
       )}
-    </div>
+    </ChainOfThought>
   )
 }

@@ -1,36 +1,100 @@
-# ── Secrets (NEVER commit) ──────────────────────────────────────────
-backend/.env
+# Secrets and local environment
 .env
+.env.*
 *.env
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+frontend/.env.local
+frontend/.env.*.local
+!.env.example
+!backend/.env.example
+!frontend/.env.example
 
-# ── Python ──────────────────────────────────────────────────────────
+# Python / FastAPI backend
 __pycache__/
 *.py[cod]
+*$py.class
 *.pyo
 *.pyd
 *.so
+.Python
 .venv/
 venv/
 env/
+ENV/
+backend/.venv/
+backend/venv/
+backend/env/
+pip-wheel-metadata/
+*.egg
 *.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.coverage
+coverage.xml
+htmlcov/
 dist/
 build/
+
+# SQLite and local persisted app data
 *.db
+*.sqlite
+*.sqlite3
 *.db-shm
 *.db-wal
+*.sqlite-shm
+*.sqlite-wal
+backend/election_guide.db
+backend/*.db
+data/
 
-# ── Node / Next.js ──────────────────────────────────────────────────
+# Node / Next.js frontend
+node_modules/
 frontend/node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
 frontend/.next/
 frontend/out/
-frontend/.env.local
-frontend/.env.production
+frontend/build/
+frontend/coverage/
+frontend/.vercel/
+frontend/.turbo/
+frontend/.swc/
+frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# ── OS & IDE ────────────────────────────────────────────────────────
+# Docker and runtime logs
+*.log
+logs/
+docker-compose.override.yml
+
+# Cloud and local tooling state
+.gcloud/
+.firebase/
+.vercel/
+.playwright-mcp/
+
+# Editor, OS, and temporary files
 .DS_Store
+Thumbs.db
 *.swp
+*.swo
+*~
 .idea/
 .vscode/
 
-# ── Docker ──────────────────────────────────────────────────────────
-*.log
+# Local notes and publishing drafts
+linkedin_post.txt
