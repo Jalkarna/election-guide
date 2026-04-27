@@ -2,8 +2,6 @@
 Tool definitions for the ElectionGuide assistant.
 All tools are standard Python functions with type annotations and docstrings.
 """
-import subprocess
-import shutil
 import json
 import logging
 import httpx
@@ -12,10 +10,6 @@ from bs4 import BeautifulSoup
 from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
-
-# Detect if gsearch CLI is available
-GSEARCH_AVAILABLE = shutil.which("gsearch") is not None
-logger.info(f"gsearch available: {GSEARCH_AVAILABLE}")
 
 
 def search(query: str) -> str:
@@ -32,23 +26,6 @@ def search(query: str) -> str:
         Search results as a JSON string with a "results" list, each item having
         "title", "url", and "snippet" fields.
     """
-    if GSEARCH_AVAILABLE:
-        try:
-            result = subprocess.run(
-                ["gsearch", query],
-                capture_output=True,
-                text=True,
-                timeout=15
-            )
-            if result.returncode == 0 and result.stdout:
-                # gsearch output — wrap in JSON for consistent source extraction
-                raw = result.stdout[:4000]
-                return json.dumps({"results": [{"title": "Search result", "url": "", "snippet": raw}]})
-            return json.dumps({"results": [], "error": f"Search returned no results for: {query}"})
-        except Exception as e:
-            logger.error(f"gsearch error: {e}")
-            return json.dumps({"results": [], "error": f"Search failed: {str(e)}"})
-
     try:
         headers = {
             "User-Agent": (

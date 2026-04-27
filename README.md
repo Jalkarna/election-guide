@@ -121,7 +121,7 @@ Docker Compose mounts `./data` to `/data`, so the SQLite database persists betwe
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `GET` | `/api/health` | Health, configured model candidates, Gemini transport, and search availability. |
+| `GET` | `/api/health` | Health, configured model candidates, Gemini transport, and grounding tool status. |
 | `POST` | `/api/i18n/translate-ui` | Translate frontend UI copy for a supported language. |
 | `POST` | `/api/chat/sessions` | Create a new chat session. |
 | `GET` | `/api/chat/sessions` | List sessions by most recently updated. |
@@ -216,5 +216,5 @@ gcloud run services logs read election-guide --region=us-central1 --project=<PRO
 
 - `backend/.env` is the local environment file read by the backend settings loader.
 - `NEXT_PUBLIC_BACKEND_URL` should be empty for the single-container Docker/Cloud Run setup because nginx serves frontend and API from the same origin.
-- The optional `gsearch` CLI is detected at startup. If unavailable, the backend falls back to DuckDuckGo HTML search.
+- The assistant grounds answers with built-in search, URL fetching, PDF extraction, and election schedule lookup tools.
 - The chat stream uses the Vercel AI SDK data stream protocol and includes text deltas, reasoning deltas, tool call events, source annotations, and finish messages.

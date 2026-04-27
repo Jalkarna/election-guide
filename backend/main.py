@@ -22,7 +22,7 @@ from sqlalchemy.orm import selectinload
 from config import settings
 from database import init_db, get_db, AsyncSessionLocal, Session as ChatSession, Message as ChatMessage
 from prompts import SYSTEM_PROMPT
-from tools import TOOLS, GSEARCH_AVAILABLE
+from tools import TOOLS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ def _create_genai_client():
 @app.on_event("startup")
 async def startup():
     await init_db()
-    logger.info(f"ElectionGuide backend started. gsearch: {GSEARCH_AVAILABLE}")
+    logger.info("ElectionGuide backend started with search/fetch grounding tools enabled")
     logger.info(f"Using model candidates: {settings.gemini_model_candidates}")
     logger.info(
         "Using Gemini transport: %s",
@@ -836,7 +836,11 @@ async def health():
         "model": settings.gemini_model_candidates[0],
         "model_candidates": settings.gemini_model_candidates,
         "transport": settings.gemini_transport,
-        "gsearch": GSEARCH_AVAILABLE,
+        "grounding": {
+            "search": True,
+            "fetch": True,
+            "election_schedule": True,
+        },
     }
 
 
