@@ -23,7 +23,7 @@ from database import init_db, get_db, Session as ChatSession, Message as ChatMes
 from prompts import SYSTEM_PROMPT
 from tools import TOOLS, GSEARCH_AVAILABLE, render_timeline
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="ElectionGuide API", version="1.0.0")
@@ -57,8 +57,7 @@ def _create_genai_client():
         )
 
     raise RuntimeError(
-        "Missing Gemini auth. Set GOOGLE_API_KEY for Vertex API-key mode, or set "
-        "USE_VERTEX_AI=true with GCP_PROJECT_ID for ADC mode."
+        "Missing Gemini auth. Set GOOGLE_API_KEY or USE_VERTEX_AI=true with GCP_PROJECT_ID."
     )
 
 
@@ -194,23 +193,27 @@ def _extract_source_urls(tool_name: str, tool_result: str, args: dict) -> list[s
         urls.append(args["url"])
 
     if tool_name == "search":
+        # Try to parse structured JSON first (new format)
         try:
             parsed = json.loads(tool_result)
             if isinstance(parsed, dict) and isinstance(parsed.get("results"), list):
                 for item in parsed["results"]:
                     if isinstance(item, dict) and isinstance(item.get("url"), str):
-                        urls.append(item["url"])
+                        u = item["url"].strip()
+                        if u and u.startswith("http"):
+                            urls.append(u)
         except Exception:
             pass
 
+        # Fallback: regex extraction from plain text
         if not urls:
-            urls.extend(re.findall(r"https?://[^\s)]+", tool_result))
+            urls.extend(re.findall(r"https?://[^\s)'\"]+", tool_result))
 
     deduped: list[str] = []
     seen: set[str] = set()
     for url in urls:
-        clean = url.strip().rstrip(".,]")
-        if not clean or clean in seen:
+        clean = url.strip().rstrip(".,])'\"")
+        if not clean or clean in seen or not clean.startswith("http"):
             continue
         seen.add(clean)
         deduped.append(clean)
@@ -228,6 +231,8 @@ def _extract_source_urls(tool_name: str, tool_result: str, args: dict) -> list[s
                 "ecisveep.nic.in",
                 "pib.gov.in",
                 "services.india.gov.in",
+                "indiankanoon.org",
+                "indiavotes.gov.in",
             )
             for host in [urlparse(url).netloc.lower()]
         )
@@ -237,6 +242,93 @@ def _extract_source_urls(tool_name: str, tool_result: str, args: dict) -> list[s
 
 def _annotation_payload(kind: str, value: str) -> dict:
     return {"type": kind, "text": value}
+
+
+# ─── Signature handling ─────────────────────────────────────────────────────
+
+# Official Vertex AI bypass string — skips thought_signature validation.
+# Use this when we can't capture or graft the real streaming signature.
+# Ref: https://cloud.google.com/vertex-ai/generative-ai/docs/thought-signatures
+_SIG_BYPASS = b"skip_thought_signature_validator"
+
+
+def _ensure_thought_signatures(parts: list) -> list:
+    """
+    Two-phase signature handling for Gemini 3 streaming:
+
+    Phase 1 — Graft: During streaming, thought_signature for a functionCall
+    may arrive as a trailing Part(text="", thought_signature=<bytes>) with no
+    function_call. Find those and graft their signature onto the preceding
+    bare functionCall Part.
+
+    Phase 2 — Bypass: For any functionCall Part that STILL has no signature
+    after grafting (either because the SDK doesn't expose thought_signature as
+    an attribute, or it arrived outside our collection window), inject the
+    official Vertex AI bypass string so validation passes.
+    """
+    from google.genai import types as _types
+
+    # ── Phase 1: Log + graft trailing signature carriers ──────────────────────
+    result = []
+    for i, part in enumerate(parts):
+        sig = getattr(part, "thought_signature", None)
+        has_fc = bool(getattr(part, "function_call", None))
+        is_thought = bool(getattr(part, "thought", False))
+        has_real_text = bool(getattr(part, "text", None) and part.text.strip())
+
+        # Diagnostic: log every part so we can see what the SDK gives us
+        logger.debug(
+            "Part[%d]: thought=%s fc=%s text_len=%d sig_bytes=%d",
+            i, is_thought, has_fc,
+            len(part.text or ""),
+            len(sig) if sig else 0,
+        )
+
+        is_trailing_sig_carrier = sig and not has_fc and not is_thought and not has_real_text
+
+        if is_trailing_sig_carrier:
+            # Walk backwards for the nearest bare functionCall Part
+            grafted = False
+            for j in range(len(result) - 1, -1, -1):
+                prev = result[j]
+                if getattr(prev, "function_call", None) and not getattr(prev, "thought_signature", None):
+                    try:
+                        result[j] = _types.Part(
+                            function_call=prev.function_call,
+                            thought_signature=sig,
+                        )
+                        logger.debug("Grafted thought_signature (%d bytes) onto FC part[%d]", len(sig), j)
+                        grafted = True
+                    except Exception as e:
+                        logger.warning("Graft failed: %s", e)
+                    break
+            if not grafted:
+                result.append(part)
+        else:
+            result.append(part)
+
+    # ── Phase 2: Bypass for any FC still missing a signature ──────────────────
+    final = []
+    for part in result:
+        if getattr(part, "function_call", None) and not getattr(part, "thought_signature", None):
+            logger.warning(
+                "functionCall '%s' has no thought_signature after grafting — "
+                "injecting bypass string", part.function_call.name
+            )
+            try:
+                patched = _types.Part(
+                    function_call=part.function_call,
+                    thought_signature=_SIG_BYPASS,
+                )
+                final.append(patched)
+            except Exception as e:
+                logger.warning("Bypass injection failed (%s), appending original part", e)
+                final.append(part)
+        else:
+            final.append(part)
+
+    return final
+
 
 
 # ─── Gemini streaming core ──────────────────────────────────────────────────
@@ -275,21 +367,20 @@ async def stream_gemini_response(
     if gemini_history and gemini_history[-1].role == "user":
         gemini_history = gemini_history[:-1]
 
-    # Tool declarations — use Google Search grounding if gsearch not available
-    tool_declarations = TOOLS  # python functions with docstrings
+    # Tool declarations
+    tool_declarations = TOOLS
 
-    # Generation config with thinking enabled
-    thinking_config = types.ThinkingConfig(
-        include_thoughts=True,
-        thinking_budget=8192,
-    )
-
-    # Build config
+    # ThinkingConfig ON — we need thoughts rendered in the UI.
+    # We bypass AsyncChat (which strips thought_signature from its internal
+    # history) and manage history manually so signatures are preserved verbatim.
     gen_config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
         tools=tool_declarations,
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-        thinking_config=thinking_config,
+        thinking_config=types.ThinkingConfig(
+            include_thoughts=True,
+            thinking_budget=8000,
+        ),
         temperature=0.1,
         max_output_tokens=8192,
     )
@@ -300,29 +391,37 @@ async def stream_gemini_response(
     tool_calls_log = []
     sources = []
 
+    # Overall 90-second deadline for the entire agentic loop
+    overall_deadline = asyncio.get_event_loop().time() + 90
+
+    # ── Manual history management (bypasses AsyncChat) ───────────────────────
+    # history[-1] at the end of each turn is a Content with ALL parts verbatim
+    # from the stream, which preserves thought_signature on functionCall parts.
+    history: list[types.Content] = list(gemini_history)
+    history.append(types.Content(role="user", parts=[types.Part(text=current_user_msg)]))
+
+    candidate_models = settings.gemini_model_candidates
+    active_model_index = 0
+    active_model = candidate_models[active_model_index]
+
     try:
-        def build_chat(model_name: str):
-            return client.aio.chats.create(
-                model=model_name,
-                history=gemini_history,
-                config=gen_config,
-            )
-
-        candidate_models = settings.gemini_model_candidates
-        active_model_index = 0
-        active_model = candidate_models[active_model_index]
-        chat = build_chat(active_model)
-
-        # Agentic loop — Gemini may call tools multiple times
-        pending_message = current_user_msg
         max_iterations = 6
-
         for iteration in range(max_iterations):
-            streamed_function_calls: list[tuple[str, dict]] = []
-            seen_function_calls: set[tuple[str, str]] = set()
+            if asyncio.get_event_loop().time() > overall_deadline:
+                logger.warning("Overall streaming deadline exceeded at iteration %d", iteration)
+                yield text_delta("\n\n*Response timed out — please try again.*")
+                break
+
+            # ── Stream one turn ──────────────────────────────────────────────
+            accumulated_parts: list[types.Part] = []
+            iter_deadline = asyncio.get_event_loop().time() + 60.0
 
             try:
-                stream = await chat.send_message_stream(pending_message)
+                stream = await client.aio.models.generate_content_stream(
+                    model=active_model,
+                    contents=history,
+                    config=gen_config,
+                )
             except Exception as exc:
                 stream_started = bool(full_text or full_thinking or tool_calls_log)
                 can_retry = (
@@ -339,54 +438,92 @@ async def stream_gemini_response(
                         active_model,
                         exc,
                     )
-                    chat = build_chat(active_model)
                     continue
                 raise
 
-            # Reset pending for next iteration
-            pending_message = None
+            seen_fc_sigs: set[tuple[str, str]] = set()
 
-            async for response in stream:
-                for candidate in response.candidates or []:
+            async for chunk in stream:
+                if asyncio.get_event_loop().time() > iter_deadline:
+                    logger.error("Per-iteration stream deadline exceeded at iteration %d", iteration)
+                    if not full_text:
+                        yield text_delta("I was unable to get a response in time. Please try again.")
+                    else:
+                        yield text_delta("\n\n*Response generation timed out.*")
+                    break
+
+                for candidate in chunk.candidates or []:
                     if not candidate.content:
                         continue
                     for part in candidate.content.parts:
-                        if hasattr(part, "thought") and part.thought and part.text:
+                        # ── Accumulate EVERY part verbatim — including empty-text
+                        # parts that carry thought_signature. Never skip these.
+                        accumulated_parts.append(part)
+
+                        # ── Stream to client ──────────────────────────────────
+                        if getattr(part, "thought", False) and part.text:
                             full_thinking.append(part.text)
-                            for chunk in _chunk_text(part.text, 50):
-                                yield reasoning_delta(chunk)
+                            for chunk_text in _chunk_text(part.text, 80):
+                                yield reasoning_delta(chunk_text)
                                 await asyncio.sleep(0)
-                        elif getattr(part, "function_call", None):
-                            fc = part.function_call
-                            tool_name = fc.name
-                            args = dict(fc.args) if fc.args else {}
-                            signature = (tool_name, json.dumps(args, sort_keys=True))
-                            if signature not in seen_function_calls:
-                                seen_function_calls.add(signature)
-                                streamed_function_calls.append((tool_name, args))
-                        elif part.text:
+                        elif part.text and not getattr(part, "thought", False):
                             full_text.append(part.text)
-                            for chunk in _chunk_text(part.text, 30):
-                                yield text_delta(chunk)
+                            for chunk_text in _chunk_text(part.text, 80):
+                                yield text_delta(chunk_text)
                                 await asyncio.sleep(0)
+                        # function_call parts are handled below after stream ends
 
-            tool_results_for_next_turn = []
+            # ── Graft trailing signature carriers onto their functionCall Parts ──
+            # During streaming, thought_signature arrives as a separate empty-text
+            # Part AFTER the functionCall Part. We must attach it before building
+            # the Content we append to history, otherwise Vertex AI rejects turn 2+.
+            final_parts = _ensure_thought_signatures(accumulated_parts)
 
-            for tool_name, args in streamed_function_calls:
+            # ── Append the COMPLETE model turn to history verbatim ───────────
+            model_content = types.Content(role="model", parts=final_parts)
+            history.append(model_content)
+
+            # ── Extract function calls from final_parts ───────────────────────
+            fc_parts = [p for p in final_parts if getattr(p, "function_call", None)]
+
+            if not fc_parts:
+                # No tool calls → final answer
+                break
+
+            # ── Execute tools and build a single tool-response Content ────────
+            # All FunctionResponses MUST go into one Content (parallel call rule).
+            tool_response_parts: list[types.Part] = []
+
+            for part in fc_parts:
+                fc = part.function_call
+                tool_name = fc.name
+                args = dict(fc.args) if fc.args else {}
+                sig = (tool_name, json.dumps(args, sort_keys=True))
+                if sig in seen_fc_sigs:
+                    continue
+                seen_fc_sigs.add(sig)
+
                 tool_call_id = str(uuid.uuid4())[:8]
                 args_str = json.dumps(args)
 
+                # Move any streamed intro text to thinking log
                 if full_text:
                     full_thinking.extend(full_text)
                     full_text.clear()
                 full_thinking.append(f"\n\n[TOOL_CALL:{tool_call_id}]\n\n")
 
-                logger.info(f"Tool call: {tool_name}({args_str})")
-
+                logger.info(f"Tool call: {tool_name}({args_str[:200]})")
                 yield tool_call_start(tool_call_id, tool_name, args_str)
                 await asyncio.sleep(0)
 
-                tool_result = await _execute_tool(tool_name, args)
+                try:
+                    tool_result = await asyncio.wait_for(
+                        _execute_tool(tool_name, args),
+                        timeout=20.0,
+                    )
+                except asyncio.TimeoutError:
+                    logger.error("Tool %s timed out", tool_name)
+                    tool_result = f"Tool {tool_name} timed out — please try again."
 
                 yield tool_result_part(tool_call_id, tool_name, tool_result[:500])
                 await asyncio.sleep(0)
@@ -397,40 +534,36 @@ async def stream_gemini_response(
                     "args": args,
                     "result_preview": tool_result[:200],
                 })
-
                 sources.extend(_extract_source_urls(tool_name, tool_result, args))
 
-                tool_results_for_next_turn.append(
+                tool_response_parts.append(
                     types.Part.from_function_response(
                         name=tool_name,
                         response={"result": tool_result},
                     )
                 )
 
+                # Emit timeline annotation immediately
                 if tool_name == "render_timeline":
                     try:
                         result_data = json.loads(tool_result)
-                        if "steps" in result_data:
-                            yield data_annotation([{
-                                "type": "timeline",
-                                "steps": result_data["steps"]
-                            }])
-                    except Exception:
-                        pass
+                        steps = result_data.get("steps")
+                        if steps and isinstance(steps, list) and len(steps) > 0:
+                            yield data_annotation([{"type": "timeline", "steps": steps}])
+                            logger.info("Emitted timeline annotation with %d steps", len(steps))
+                        elif result_data.get("status") == "error":
+                            logger.warning("render_timeline returned error: %s", result_data.get("error"))
+                    except Exception as te:
+                        logger.error("Failed to parse render_timeline result: %s", te)
 
-            if tool_results_for_next_turn:
-                pending_message = tool_results_for_next_turn
-                continue
+            # ── Append all tool responses as a single "user" turn ─────────────
+            # This is required — never interleave FC/FR pairs.
+            history.append(types.Content(role="user", parts=tool_response_parts))
 
-            # If no pending tool results, we're done
-            if pending_message is None:
-                break
-
-        # Emit sources as annotation
+        # Emit sources
         if sources:
             yield data_annotation([{"type": "sources", "urls": list(set(sources))}])
 
-        # Finish
         yield finish_message("stop", {"promptTokens": 0, "completionTokens": 0})
 
         # Persist assistant message to DB
@@ -464,6 +597,7 @@ async def stream_gemini_response(
             tool_calls={"calls": tool_calls_log} if tool_calls_log else None,
             sources=list(set(sources)) if sources else None,
         )
+
 
 
 def _chunk_text(text: str, size: int):
@@ -604,10 +738,10 @@ async def chat_stream(
 
     return StreamingResponse(
         stream_gemini_response(user_msg_content, session_id, db),
-        media_type="text/plain; charset=utf-8",
+        media_type="text/event-stream; charset=utf-8",
         headers={
             "x-vercel-ai-ui-message-stream": "v1",
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },

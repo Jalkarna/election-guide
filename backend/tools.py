@@ -28,7 +28,8 @@ def search(query: str) -> str:
         query: The search query string describing what information is needed.
 
     Returns:
-        Search results as a formatted string with titles and snippets.
+        Search results as a JSON string with a "results" list, each item having
+        "title", "url", and "snippet" fields.
     """
     if GSEARCH_AVAILABLE:
         try:
@@ -39,11 +40,13 @@ def search(query: str) -> str:
                 timeout=15
             )
             if result.returncode == 0 and result.stdout:
-                return result.stdout[:4000]
-            return f"Search returned no results for: {query}"
+                # gsearch output — wrap in JSON for consistent source extraction
+                raw = result.stdout[:4000]
+                return json.dumps({"results": [{"title": "Search result", "url": "", "snippet": raw}]})
+            return json.dumps({"results": [], "error": f"Search returned no results for: {query}"})
         except Exception as e:
             logger.error(f"gsearch error: {e}")
-            return f"Search failed: {str(e)}"
+            return json.dumps({"results": [], "error": f"Search failed: {str(e)}"})
 
     try:
         headers = {
@@ -63,31 +66,38 @@ def search(query: str) -> str:
 
         soup = BeautifulSoup(response.text, "html.parser")
         results = []
-        for item in soup.select(".result")[:5]:
+        for item in soup.select(".result")[:8]:
             title_el = item.select_one(".result__title a") or item.select_one("a.result__a")
             snippet_el = item.select_one(".result__snippet")
             url_el = item.select_one(".result__url") or title_el
             title = title_el.get_text(" ", strip=True) if title_el else ""
             snippet = snippet_el.get_text(" ", strip=True) if snippet_el else ""
             url = title_el.get("href", "") if title_el else ""
+            # Extract actual URL from DuckDuckGo redirect if present
+            if url and "uddg=" in url:
+                from urllib.parse import unquote, parse_qs, urlparse as _up
+                try:
+                    qs = parse_qs(_up(url).query)
+                    url = unquote(qs.get("uddg", [url])[0])
+                except Exception:
+                    pass
+            if not url and url_el and url_el != title_el:
+                url = url_el.get_text(" ", strip=True).strip()
             if not title:
                 continue
             results.append({
                 "title": title,
-                "url": url or (url_el.get_text(" ", strip=True) if url_el else ""),
+                "url": url or "",
                 "snippet": snippet,
             })
 
         if not results:
-            return f"Search returned no results for: {query}"
+            return json.dumps({"results": [], "error": f"Search returned no results for: {query}"})
 
-        return "\n\n".join(
-            f"{idx}. {item['title']}\n{item['url']}\n{item['snippet']}".strip()
-            for idx, item in enumerate(results, start=1)
-        )
+        return json.dumps({"results": results})
     except Exception as e:
         logger.error(f"fallback search error: {e}")
-        return f"Search failed: {str(e)}"
+        return json.dumps({"results": [], "error": f"Search failed: {str(e)}"})
 
 
 import io
@@ -175,21 +185,27 @@ def render_timeline(steps: List[dict]) -> str:
                - date_or_duration: Specific date, deadline, or time duration
 
     Returns:
-        Confirmation string that the timeline has been rendered.
+        JSON string with status and validated steps for frontend rendering.
     """
     try:
         # Validate steps format
         validated = []
         for step in steps:
-            validated.append({
-                "phase": str(step.get("phase", "")),
-                "title": str(step.get("title", "")),
-                "description": str(step.get("description", "")),
-                "date_or_duration": str(step.get("date_or_duration", ""))
-            })
+            if isinstance(step, dict):
+                validated.append({
+                    "phase": str(step.get("phase", "")),
+                    "title": str(step.get("title", "")),
+                    "description": str(step.get("description", "")),
+                    "date_or_duration": str(step.get("date_or_duration", ""))
+                })
+        if not validated:
+            logger.warning("render_timeline called with no valid steps")
+            return json.dumps({"status": "error", "error": "No valid steps provided"})
+        logger.info(f"render_timeline: {len(validated)} steps")
         return json.dumps({"status": "timeline_rendered", "steps": validated})
     except Exception as e:
-        return f"Timeline rendering failed: {str(e)}"
+        logger.error(f"render_timeline error: {e}")
+        return json.dumps({"status": "error", "error": str(e)})
 
 
 def get_election_schedule() -> str:

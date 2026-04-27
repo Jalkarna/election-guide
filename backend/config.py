@@ -18,7 +18,7 @@ class Settings(BaseSettings):
 
     google_api_key: str | None = None
     database_url: str = "sqlite+aiosqlite:///./election_guide.db"
-    gemini_model: str = "gemini-2.5-flash"
+    gemini_model: str = "gemini-3-flash-preview"
     gemini_fallback_model: str = "gemini-2.5-flash"
     use_vertex_ai: bool = False
     gcp_project_id: str | None = None
