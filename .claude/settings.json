@@ -1,0 +1,33 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "archiva hooks session-start"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "archiva hooks post-tool-use"
+          }
+        ]
+      }
+    ]
+  },
+  "mcpServers": {
+    "archiva": {
+      "command": "archiva",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}

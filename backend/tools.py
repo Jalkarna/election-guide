@@ -7,9 +7,44 @@ import logging
 import httpx
 import io
 from bs4 import BeautifulSoup
+from config import settings
 from pypdf import PdfReader
 
 logger = logging.getLogger(__name__)
+
+
+def _google_custom_search(query: str) -> str | None:
+    if not settings.google_search_configured:
+        return None
+
+    try:
+        with httpx.Client(timeout=12.0, follow_redirects=True) as client:
+            response = client.get(
+                "https://www.googleapis.com/customsearch/v1",
+                params={
+                    "key": settings.google_search_api_key,
+                    "cx": settings.google_search_engine_id,
+                    "q": query,
+                    "num": 8,
+                    "safe": "active",
+                },
+            )
+            response.raise_for_status()
+        payload = response.json()
+        results = [
+            {
+                "title": item.get("title", ""),
+                "url": item.get("link", ""),
+                "snippet": item.get("snippet", ""),
+                "source": "google_custom_search",
+            }
+            for item in payload.get("items", [])
+            if item.get("title") and item.get("link")
+        ]
+        return json.dumps({"results": results, "provider": "google_custom_search"})
+    except Exception as e:
+        logger.warning("Google Custom Search failed; falling back to HTML search: %s", e)
+        return None
 
 
 def search(query: str) -> str:
@@ -26,6 +61,10 @@ def search(query: str) -> str:
         Search results as a JSON string with a "results" list, each item having
         "title", "url", and "snippet" fields.
     """
+    google_result = _google_custom_search(query)
+    if google_result is not None:
+        return google_result
+
     try:
         headers = {
             "User-Agent": (

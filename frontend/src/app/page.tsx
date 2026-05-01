@@ -9,6 +9,7 @@ import { SourceCitations } from "@/components/SourceCitations"
 import { createSession, listSessions, deleteSession, getSession, translateUiCopy, type Session } from "@/lib/api"
 import { BACKEND_WS_URL } from "@/lib/config"
 import { LANGUAGES, LANGUAGE_LABELS, UI_COPY, type Language, type UiCopy, type UiCopyKey } from "@/lib/i18n"
+import { sanitizeAssistantContent, stripMarkdown } from "@/lib/markdown"
 import {
   Plus, Trash2, ArrowUp, Menu, Square,
   ChevronLeft, ChevronRight, ChevronDown, Globe,
@@ -25,39 +26,6 @@ interface ChatMessage {
   toolCalls?: { id: string; name: string; args: Record<string, unknown>; done: boolean }[]
   sources?: string[]
   workedForMs?: number  // milliseconds the turn took (set after streaming ends)
-}
-
-function sanitizeAssistantContent(content: string) {
-  let next = content.replace(/\r\n/g, "\n")
-  next = next.replace(/\s*\[Source:[^\]]+\]/g, "")
-  // Fix common model markdown glitches before handing content to ReactMarkdown.
-  next = next.replace(/\b(I am|I'm|This is)(ElectionGuide)\b/g, "$1 ElectionGuide")
-  next = next.replace(/(^|[\n \t])\*{3}[ \t]*([^*\n:]{1,72}):\*\*[ \t]*/gu, (_match, prefix, label) => {
-    return `${prefix && prefix.includes("\n") ? prefix : "\n"}- **${String(label).trim()}:** `
-  })
-  next = next.replace(/\*\*[ \t]+(?=\S)/g, "**")
-  next = next.replace(/\*\*([^*\n]*?\S)[ \t]+\*\*/g, "**$1**")
-  next = next.replace(/(^|\n)([ \t]*(?:(?:[-*+]|\d+[.)])\s+)?)([^*\n:]{1,64}):\*\*(?=\s)/gu, (_match, lineStart, prefix, label) => {
-    return `${lineStart}${prefix}**${String(label).trim()}:**`
-  })
-  next = next.replace(/(\*\*[^*\n]{1,80}:\*\*)(?=\S)/gu, "$1 ")
-  next = next.replace(/(^|\n)[ \t]*(?:[-*_][ \t]*){3,}(?=\n|$)/g, "$1\n")
-  // Fix deserialization artifacts: space before punctuation.
-  next = next.replace(/\s+([,;:.!?])/g, "$1")
-  next = next.replace(/\n{3,}/g, "\n\n")
-  return next.trim()
-}
-
-/** Strip markdown for plain-text contexts (sidebar titles) */
-function stripMarkdown(text: string): string {
-  return text
-    .replace(/\*\*(.+?)\*\*/g, "$1")
-    .replace(/\*(.+?)\*/g, "$1")
-    .replace(/__(.+?)__/g, "$1")
-    .replace(/_(.+?)_/g, "$1")
-    .replace(/`(.+?)`/g, "$1")
-    .replace(/#+\s*/g, "")
-    .trim()
 }
 
 function BlinkText({ text, className }: { text: string; className?: string }) {
@@ -375,7 +343,7 @@ function Greeting({
               type="button"
               disabled={disabled}
               onClick={() => onSuggest(prompt)}
-              className="group flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border border-border/60 bg-card px-3.5 py-3 text-left text-sm font-medium text-foreground shadow-[var(--shadow-card)] transition-all duration-200 hover:border-[color:var(--saffron)]/50 hover:bg-accent/50 hover:shadow-[var(--shadow-float)] disabled:pointer-events-none disabled:opacity-55 sm:px-4 sm:py-3.5"
+              className="group flex min-h-12 cursor-pointer items-center gap-3 rounded-xl border border-border/60 bg-card px-3.5 py-3 text-left text-sm font-medium text-foreground shadow-[var(--shadow-card)] transition-all duration-200 hover:border-[color:var(--saffron)]/50 hover:bg-accent/50 hover:shadow-[var(--shadow-float)] disabled:pointer-events-none disabled:opacity-55 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color:var(--saffron)] focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.99] sm:px-4 sm:py-3.5"
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 + i * 0.055, duration: 0.35, ease: [0.22, 1, 0.36, 1] }}

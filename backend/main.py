@@ -7,6 +7,7 @@ import json
 import logging
 import re
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import AsyncIterator
 from urllib.parse import urlparse
@@ -14,33 +15,23 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from config import settings
 from database import init_db, get_db, AsyncSessionLocal, Session as ChatSession, Message as ChatMessage
+from google_services import configure_cloud_logging, google_services_health, write_firestore_audit_event
 from prompts import SYSTEM_PROMPT
+from security import security_headers_middleware, validate_chat_message
 from tools import TOOLS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="ElectionGuide API", version="1.0.0")
-
 STREAM_TEXT_CHUNK_SIZE = 48
 STREAM_CHUNK_DELAY_SECONDS = 0.015
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["x-vercel-ai-ui-message-stream"],
-)
-
 
 def _create_genai_client():
     from google import genai
@@ -65,8 +56,9 @@ def _create_genai_client():
     )
 
 
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    configure_cloud_logging(settings)
     await init_db()
     logger.info("ElectionGuide backend started with search/fetch grounding tools enabled")
     logger.info(f"Using model candidates: {settings.gemini_model_candidates}")
@@ -74,6 +66,19 @@ async def startup():
         "Using Gemini transport: %s",
         settings.gemini_transport,
     )
+    yield
+
+
+app = FastAPI(title="ElectionGuide API", version="1.0.0", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["x-vercel-ai-ui-message-stream"],
+)
+app.middleware("http")(security_headers_middleware)
 
 
 # ─── Pydantic schemas ───────────────────────────────────────────────────────
@@ -94,16 +99,17 @@ class UiTranslateRequest(BaseModel):
 
 
 class SessionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     title: str | None
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 class MessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     role: str
     content: str | None
@@ -113,19 +119,15 @@ class MessageOut(BaseModel):
     worked_ms: int | None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 class SessionDetail(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     title: str | None
     created_at: datetime
     updated_at: datetime
     messages: list[MessageOut]
-
-    class Config:
-        from_attributes = True
 
 
 # ─── Vercel AI SDK Data Stream helpers ──────────────────────────────────────
@@ -841,6 +843,7 @@ async def health():
             "fetch": True,
             "election_schedule": True,
         },
+        "google_services": google_services_health(settings),
     }
 
 
@@ -931,6 +934,16 @@ async def _save_user_message_for_stream(
         session.title = user_msg_content[:60] + ("..." if len(user_msg_content) > 60 else "")
 
     await db.commit()
+    write_firestore_audit_event(
+        "chat_message_saved",
+        {
+            "session_id": session_id,
+            "role": "user",
+            "message_length": len(user_msg_content),
+            "has_title": bool(session.title),
+        },
+        settings,
+    )
 
 
 class FlushingStreamResponse(Response):
@@ -985,10 +998,8 @@ async def chat_stream(
     request: ChatRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    user_msg_content = request.message.strip()
+    user_msg_content = validate_chat_message(request.message)
     language = request.language.strip() if request.language else "English"
-    if not user_msg_content:
-        raise HTTPException(status_code=400, detail="Message cannot be empty")
     await _save_user_message_for_stream(session_id, user_msg_content, db)
 
     return FlushingStreamResponse(
@@ -1009,13 +1020,14 @@ async def chat_websocket(websocket: WebSocket, session_id: str):
 
     try:
         payload = await websocket.receive_json()
-        user_msg_content = str(payload.get("message", "")).strip()
-        language = str(payload.get("language", "English")).strip()
-        if not user_msg_content:
-            await websocket.send_text(text_delta("Empty message."))
+        try:
+            user_msg_content = validate_chat_message(str(payload.get("message", "")))
+        except HTTPException as exc:
+            await websocket.send_text(text_delta(str(exc.detail)))
             await websocket.send_text(finish_message("error"))
             await websocket.close()
             return
+        language = str(payload.get("language", "English")).strip()
 
         async with AsyncSessionLocal() as db:
             try:

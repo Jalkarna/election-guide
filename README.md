@@ -4,15 +4,21 @@ ElectionGuide is a full-stack AI assistant for Indian election questions. It com
 
 The app is packaged as a single Docker image for local Docker Compose and Google Cloud Run. In production, nginx fronts both the Next.js standalone server and the FastAPI API server on one public port.
 
+## Challenge Vertical
+
+Chosen vertical: civic information assistant.
+
+ElectionGuide is designed for Indian voters, first-time citizens, candidates, and election volunteers who need reliable, neutral, and source-grounded election guidance. The assistant makes decisions based on user context: selected response language, conversation history, the type of election question, and whether current facts require tool verification before answering.
+
 ## Features
 
 - AI chat experience focused on Indian elections, voting processes, eligibility, schedules, and civic information.
 - Gemini response streaming with reasoning, tool-call events, source annotations, and fallback model handling.
 - Session persistence with SQLite via SQLAlchemy async models.
 - Multilingual response support and UI copy translation for Indian languages.
-- Web search, page fetching, PDF text extraction, and Election Commission schedule lookup tools.
+- Google Custom Search grounding with fallback search, page fetching, PDF text extraction, and Election Commission schedule lookup tools.
 - Single-container production runtime with Next.js, FastAPI, and nginx.
-- Cloud Run deployment through Cloud Build, Artifact Registry, Secret Manager, and a Cloud Storage mounted data volume.
+- Cloud Run deployment through Cloud Build, Artifact Registry, Secret Manager, Cloud Logging, and a Cloud Storage mounted data volume.
 
 ## Stack
 
@@ -20,10 +26,10 @@ The app is packaged as a single Docker image for local Docker Compose and Google
 | --- | --- |
 | Frontend | Next.js 16, React 19, TypeScript, Tailwind CSS |
 | Backend | FastAPI, Uvicorn, Pydantic, SQLAlchemy async |
-| AI | Google Gemini via `google-genai` |
+| AI | Google Gemini / Vertex AI via `google-genai` |
 | Storage | SQLite locally or mounted at `/data` in Docker/Cloud Run |
 | Runtime | Docker, nginx reverse proxy |
-| Cloud | Google Cloud Build, Artifact Registry, Cloud Run, Secret Manager, Cloud Storage |
+| Cloud | Google Cloud Build, Artifact Registry, Cloud Run, Secret Manager, Cloud Logging, Cloud Storage, optional Firestore audit |
 
 ## Repository Layout
 
@@ -33,14 +39,19 @@ The app is packaged as a single Docker image for local Docker Compose and Google
 |   |-- main.py              # FastAPI app, streaming chat API, session routes
 |   |-- config.py            # Environment-based settings
 |   |-- database.py          # SQLAlchemy models and async session setup
+|   |-- google_services.py   # Google service registry, health, logging, secret/audit helpers
 |   |-- prompts.py           # ElectionGuide system prompt
 |   |-- tools.py             # Search, URL/PDF fetch, election schedule tools
+|   |-- tests/               # Backend pytest coverage for config, tools, Google services
 |   `-- requirements.txt     # Python dependencies
 |-- frontend/
 |   |-- src/app/             # Next.js app routes and global CSS
 |   |-- src/components/      # Chat, thinking, citation, and UI components
 |   |-- src/lib/             # API client, config, i18n helpers
+|   |-- tests/               # Frontend Node tests for markdown cleanup
 |   `-- package.json         # Frontend scripts and dependencies
+|-- docs/                    # Google service, testing, and submission notes
+|-- scripts/                 # Quality gate and repository size checks
 |-- Dockerfile               # Multi-stage production image
 |-- docker-compose.yml       # Local single-container deployment
 |-- docker-entrypoint.sh     # Starts FastAPI, Next.js, and nginx
@@ -65,6 +76,11 @@ Then set the values needed for your environment.
 | `USE_VERTEX_AI` | No | `false` | Set to `true` to use Vertex AI Application Default Credentials instead of `GOOGLE_API_KEY`. |
 | `GCP_PROJECT_ID` | Required for Vertex AI / Cloud Run | none | Google Cloud project ID. |
 | `GCP_LOCATION` | No | `us-central1` | Vertex AI and Cloud Run region. |
+| `GOOGLE_SEARCH_API_KEY` | No | none | Enables Google Custom Search JSON API grounding. |
+| `GOOGLE_SEARCH_ENGINE_ID` | No | none | Programmable Search Engine ID for Google Custom Search. |
+| `ENABLE_CLOUD_LOGGING` | No | `false` | Enables Google Cloud Logging setup in Cloud Run. |
+| `ENABLE_FIRESTORE_AUDIT` | No | `false` | Enables optional non-sensitive Firestore audit events. |
+| `FIRESTORE_AUDIT_COLLECTION` | No | `electionguide_audit` | Firestore collection used for audit events. |
 | `DATABASE_URL` | No | `sqlite+aiosqlite:///./election_guide.db` | Async SQLAlchemy database URL. Docker uses `/data/election_guide.db`. |
 | `GEMINI_MODEL` | No | `gemini-3-flash-preview` | Primary Gemini model. |
 | `GEMINI_FALLBACK_MODEL` | No | `gemini-2.5-flash` | Fallback model for retryable model errors. |
@@ -141,6 +157,39 @@ curl -N \
   -d '{"message":"How do I check my voter registration status?","language":"English"}'
 ```
 
+## Testing and Quality
+
+Backend:
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest --cov=. --cov-report=term-missing
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm run lint
+npm test
+npm run build
+```
+
+Full local quality gate:
+
+```bash
+./scripts/run_quality_checks.sh
+```
+
+Submission size check:
+
+```bash
+./scripts/check_repo_size.sh
+```
+
+See [docs/TESTING.md](docs/TESTING.md), [docs/GOOGLE_SERVICES.md](docs/GOOGLE_SERVICES.md), [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md), [SECURITY.md](SECURITY.md), and [docs/SUBMISSION_CHECKLIST.md](docs/SUBMISSION_CHECKLIST.md).
+
 ## Cloud Run Deployment
 
 This repo includes a Cloud Build config that:
@@ -156,7 +205,8 @@ Required Google Cloud resources:
 
 - Artifact Registry repository: `election-guide` in `us-central1`.
 - Secret Manager secret: `GOOGLE_API_KEY`.
-- Enabled APIs: Cloud Build, Cloud Run, Artifact Registry, Secret Manager, and Cloud Storage.
+- Optional Secret Manager secret: `GOOGLE_SEARCH_API_KEY` if using Google Custom Search.
+- Enabled APIs: Cloud Build, Cloud Run, Artifact Registry, Secret Manager, Cloud Logging, Cloud Storage, Vertex AI / Gemini, and optionally Firestore + Custom Search.
 - Cloud Build service account permissions to push images, deploy Cloud Run, read the secret, and manage/use the storage bucket.
 
 Deploy:

@@ -1,0 +1,41 @@
+file: frontend/src/app/page.tsx
+schema: 1
+decisions:
+  fn:Greeting:
+    id: dec_003
+    lines_hint:
+      - 378
+      - 378
+    fingerprint: ef2c8579
+    chose: >-
+      Added active:scale-[0.99] to the suggestion card button className alongside the existing
+      focus-visible ring classes
+    because: >-
+      Provides subtle press feedback on click/tap without causing layout shift. scale-[0.99] is
+      small enough to be imperceptible to motion-sensitive users and does not affect surrounding
+      elements because CSS scale transforms do not affect layout flow.
+    rejected:
+      - approach: active:scale-95 or larger scale-down
+        reason: Too pronounced — shifts perceived layout and is distracting for a small card button
+      - approach: active:opacity-80 instead of scale
+        reason: >-
+          Opacity flash is less tactile and already partially covered by the disabled:opacity-55
+          state, making the two states harder to distinguish
+    timestamp: '2026-04-28T15:28:54.824Z'
+    history:
+      - id: dec_002
+        chose: >-
+          Added focus-visible:outline-none focus-visible:ring-2
+          focus-visible:ring-[color:var(--saffron)] focus-visible:ring-offset-2
+          focus-visible:ring-offset-background to the suggestion card button className
+        because: >-
+          Keyboard users had no visible focus indicator on suggestion cards, violating WCAG 2.4.7.
+          Using the existing saffron CSS variable keeps the ring on-brand. ring-offset-background
+          pins the offset color to the design-token background so the gap between the ring and the
+          button remains visually correct across light, dark, and any future themes.
+        timestamp: '2026-04-28T15:27:12.729Z'
+        superseded_reason: >-
+          Provides subtle press feedback on click/tap without causing layout shift. scale-[0.99] is
+          small enough to be imperceptible to motion-sensitive users and does not affect surrounding
+          elements because CSS scale transforms do not affect layout flow.
+    supersedes: dec_002
