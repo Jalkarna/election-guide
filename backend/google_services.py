@@ -71,6 +71,12 @@ def google_service_statuses(active_settings: Settings = settings) -> list[Google
             required_env=("ENABLE_FIRESTORE_AUDIT", "GCP_PROJECT_ID"),
         ),
         GoogleServiceStatus(
+            name="Google Identity Services",
+            purpose="Provides OAuth sign-in and account creation for saved civic journeys.",
+            configured=active_settings.google_oauth_configured,
+            required_env=("GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GOOGLE_OAUTH_REDIRECT_URI"),
+        ),
+        GoogleServiceStatus(
             name="Cloud Storage Volume",
             purpose="Persists the SQLite database across Cloud Run revisions.",
             configured=active_settings.database_url.startswith("sqlite+aiosqlite:////data/"),

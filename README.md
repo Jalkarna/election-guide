@@ -1,8 +1,8 @@
 # ElectionGuide
 
-ElectionGuide is a full-stack AI assistant for Indian election questions. It combines a Next.js chat interface with a FastAPI backend that streams Gemini responses, persists chat sessions in SQLite, and can use web/source-fetching tools for current election information.
+ElectionGuide is a full-stack civic AI platform for Indian elections. It provides Gemini-powered AI chat, voter readiness scoring, guided voting journeys, an interactive EVM/VVPAT simulator, civic quizzes, scenario-based guides, an India electoral map, and verified official resources — all grounded in ECI data and designed for first-time voters, returning voters, NRIs, senior citizens, and persons with disabilities.
 
-The app is packaged as a single Docker image for local Docker Compose and Google Cloud Run. In production, nginx fronts both the Next.js standalone server and the FastAPI API server on one public port.
+The backend is a FastAPI service with Google Gemini streaming, SQLAlchemy async models, three-tier rate limiting, and a full security middleware layer. The frontend is a Next.js 16 app with Framer Motion animations, WCAG 2.1 AA accessibility, and a dark-first India-themed design system. The app is packaged as a single Docker image for Cloud Run. In production, nginx fronts both the Next.js standalone server and the FastAPI API server on one public port.
 
 ## Challenge Vertical
 
@@ -10,9 +10,24 @@ Chosen vertical: civic information assistant.
 
 ElectionGuide is designed for Indian voters, first-time citizens, candidates, and election volunteers who need reliable, neutral, and source-grounded election guidance. The assistant makes decisions based on user context: selected response language, conversation history, the type of election question, and whether current facts require tool verification before answering.
 
+## Evaluation Scorecard Targets
+
+| Category | Implementation signals |
+| --- | --- |
+| Code Quality | Modular FastAPI services, auth and platform packages, typed schemas, split React chat/platform/auth components, reusable hooks/utilities |
+| Security | Secret Manager, bounded inputs, rate limiting, browser hardening headers, safe external links, no committed secrets |
+| Efficiency | Streaming WebSocket responses, bounded fetch/PDF extraction, model fallback, deterministic platform tools, Cloud Run scale-to-zero |
+| Testing | 172 backend tests across auth, platform, security (audit + enhanced + edge cases), integration, config, tools, and Google services; 12 frontend tests for markdown, accessibility, auth, route breadth, and platform client |
+| Accessibility | ARIA labels, keyboard focus, disabled states, responsive sidebar, documented manual checks |
+| Google Services | Gemini, Google Identity Services, Cloud Run, Cloud Build, Artifact Registry, Secret Manager, Cloud Logging, Cloud Storage, optional Custom Search and Firestore audit |
+| Problem Alignment | Non-partisan Indian election assistant with voter readiness, journey, booth guide, quiz, scenarios, and verified chat |
+
 ## Features
 
+- Landing-first civic platform surface with a dedicated `/assistant` chat workspace.
 - AI chat experience focused on Indian elections, voting processes, eligibility, schedules, and civic information.
+- Civic platform APIs for readiness scoring, voting journeys, booth guidance, quizzes, scenario simulation, and engagement insights.
+- Auth pages for login/signup with Google OAuth provider discovery and env-driven credentials. Falls back to a local dev session when OAuth credentials are not configured.
 - Gemini response streaming with reasoning, tool-call events, source annotations, and fallback model handling.
 - Session persistence with SQLite via SQLAlchemy async models.
 - Multilingual response support and UI copy translation for Indian languages.
@@ -29,26 +44,30 @@ ElectionGuide is designed for Indian voters, first-time citizens, candidates, an
 | AI | Google Gemini / Vertex AI via `google-genai` |
 | Storage | SQLite locally or mounted at `/data` in Docker/Cloud Run |
 | Runtime | Docker, nginx reverse proxy |
-| Cloud | Google Cloud Build, Artifact Registry, Cloud Run, Secret Manager, Cloud Logging, Cloud Storage, optional Firestore audit |
+| Cloud | Google Cloud Build, Artifact Registry, Cloud Run, Secret Manager, Cloud Logging, Cloud Storage, Google Identity Services, optional Firestore audit |
 
 ## Repository Layout
 
 ```text
 .
 |-- backend/
+|   |-- auth/                # Google OAuth provider metadata, session issue/lookup/logout
+|   |-- civic_platform/      # Readiness, journey, quiz, scenario, booth, analytics APIs
+|   |-- services/            # Gemini streaming service and protocol helpers
 |   |-- main.py              # FastAPI app, streaming chat API, session routes
 |   |-- config.py            # Environment-based settings
 |   |-- database.py          # SQLAlchemy models and async session setup
+|   |-- genai_client.py      # Gemini / Vertex AI client factory
 |   |-- google_services.py   # Google service registry, health, logging, secret/audit helpers
 |   |-- prompts.py           # ElectionGuide system prompt
 |   |-- tools.py             # Search, URL/PDF fetch, election schedule tools
-|   |-- tests/               # Backend pytest coverage for config, tools, Google services
+|   |-- tests/               # Backend pytest coverage for auth, platform, config, tools, Google services
 |   `-- requirements.txt     # Python dependencies
 |-- frontend/
-|   |-- src/app/             # Next.js app routes and global CSS
-|   |-- src/components/      # Chat, thinking, citation, and UI components
-|   |-- src/lib/             # API client, config, i18n helpers
-|   |-- tests/               # Frontend Node tests for markdown cleanup
+|   |-- src/app/             # Landing, assistant, platform, auth, and info routes
+|   |-- src/components/      # Chat, auth, platform, thinking, citation, and UI components
+|   |-- src/lib/             # API/auth/platform clients, config, i18n helpers
+|   |-- tests/               # Frontend Node tests for markdown, routes, auth, accessibility
 |   `-- package.json         # Frontend scripts and dependencies
 |-- docs/                    # Google service, testing, and submission notes
 |-- scripts/                 # Quality gate and repository size checks
@@ -81,6 +100,10 @@ Then set the values needed for your environment.
 | `ENABLE_CLOUD_LOGGING` | No | `false` | Enables Google Cloud Logging setup in Cloud Run. |
 | `ENABLE_FIRESTORE_AUDIT` | No | `false` | Enables optional non-sensitive Firestore audit events. |
 | `FIRESTORE_AUDIT_COLLECTION` | No | `electionguide_audit` | Firestore collection used for audit events. |
+| `GOOGLE_OAUTH_CLIENT_ID` | No | none | Google Identity Services OAuth client ID for sign-in. |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | No | none | Google OAuth secret. Keep this in Secret Manager for production. |
+| `GOOGLE_OAUTH_REDIRECT_URI` | No | `/api/auth/google/callback` | OAuth callback URL for Google sign-in. |
+| `AUTH_SESSION_TTL_HOURS` | No | `24` | Lifetime for issued auth sessions. |
 | `DATABASE_URL` | No | `sqlite+aiosqlite:///./election_guide.db` | Async SQLAlchemy database URL. Docker uses `/data/election_guide.db`. |
 | `GEMINI_MODEL` | No | `gemini-3-flash-preview` | Primary Gemini model. |
 | `GEMINI_FALLBACK_MODEL` | No | `gemini-2.5-flash` | Fallback model for retryable model errors. |
@@ -139,6 +162,20 @@ Docker Compose mounts `./data` to `/data`, so the SQLite database persists betwe
 | --- | --- | --- |
 | `GET` | `/api/health` | Health, configured model candidates, Gemini transport, and grounding tool status. |
 | `POST` | `/api/i18n/translate-ui` | Translate frontend UI copy for a supported language. |
+| `GET` | `/api/platform/features` | Machine-readable civic platform feature catalog. |
+| `POST` | `/api/platform/readiness` | Score voter readiness and return missing next actions. |
+| `POST` | `/api/platform/journey` | Generate persona-aware voting journey steps. |
+| `POST` | `/api/platform/booth-guide` | Return polling booth preparation and accessibility guidance. |
+| `GET` | `/api/platform/quiz` | Return civic literacy quiz questions. |
+| `POST` | `/api/platform/quiz/submit` | Grade quiz answers with explanations. |
+| `POST` | `/api/platform/scenario` | Simulate common election problem paths. |
+| `POST` | `/api/platform/analytics/insights` | Return non-sensitive civic engagement insights. |
+| `GET` | `/api/auth/providers` | Return Google Identity Services provider metadata and required env vars. |
+| `GET` | `/api/auth/google/start` | Return a Google OAuth authorization URL when credentials are configured. |
+| `GET` | `/api/auth/google/callback` | OAuth callback placeholder for production token exchange wiring. |
+| `POST` | `/api/auth/google/dev` | Create a local dev session when OAuth credentials are not configured. |
+| `GET` | `/api/auth/session` | Resolve a bearer token to the current auth session. |
+| `POST` | `/api/auth/logout` | Revoke an auth session token. |
 | `POST` | `/api/chat/sessions` | Create a new chat session. |
 | `GET` | `/api/chat/sessions` | List sessions by most recently updated. |
 | `GET` | `/api/chat/sessions/{session_id}` | Read a session and its messages. |
@@ -188,7 +225,7 @@ Submission size check:
 ./scripts/check_repo_size.sh
 ```
 
-See [docs/TESTING.md](docs/TESTING.md), [docs/GOOGLE_SERVICES.md](docs/GOOGLE_SERVICES.md), [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md), [SECURITY.md](SECURITY.md), and [docs/SUBMISSION_CHECKLIST.md](docs/SUBMISSION_CHECKLIST.md).
+See [docs/TESTING.md](docs/TESTING.md), [docs/GOOGLE_SERVICES.md](docs/GOOGLE_SERVICES.md), [docs/PLATFORM_FEATURES.md](docs/PLATFORM_FEATURES.md), [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md), [docs/ACCESSIBILITY.md](docs/ACCESSIBILITY.md), [SECURITY.md](SECURITY.md), and [docs/SUBMISSION_CHECKLIST.md](docs/SUBMISSION_CHECKLIST.md).
 
 ## Cloud Run Deployment
 

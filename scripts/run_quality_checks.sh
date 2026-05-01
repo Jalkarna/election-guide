@@ -4,7 +4,18 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$repo_root"
-python3 -m py_compile backend/main.py backend/config.py backend/database.py backend/google_services.py backend/prompts.py backend/tools.py
+python3 -m py_compile \
+  backend/main.py \
+  backend/config.py \
+  backend/database.py \
+  backend/genai_client.py \
+  backend/google_services.py \
+  backend/security.py \
+  backend/prompts.py \
+  backend/tools.py \
+  backend/auth/*.py \
+  backend/services/*.py \
+  backend/civic_platform/*.py
 
 if command -v pytest >/dev/null 2>&1; then
   (cd backend && pytest)

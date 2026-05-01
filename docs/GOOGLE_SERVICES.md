@@ -13,12 +13,13 @@ ElectionGuide uses Google services as part of the product architecture, not only
 | Cloud Logging | `backend/google_services.py` | Enables structured logs from Cloud Run when configured. | `ENABLE_CLOUD_LOGGING=true` |
 | Cloud Storage volume | `cloudbuild.yaml` | Persists SQLite data across Cloud Run revisions. | `DATABASE_URL=sqlite+aiosqlite:////data/election_guide.db` |
 | Firestore audit trail | `backend/google_services.py` | Optional non-sensitive event audit trail for assistant lifecycle events. | `ENABLE_FIRESTORE_AUDIT=true` |
+| Google Identity Services | `backend/auth/`, `frontend/src/components/auth/AuthPanel.tsx` | Provides Google OAuth sign-in surface and persisted auth sessions for saved civic journeys. | `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT_URI` |
 
 The `/api/health` endpoint exposes a `google_services` object so reviewers and operators can see which integrations are configured in the running environment.
 
 ## Graceful Degradation
 
-Local development does not require every Google service. If Custom Search is not configured, the search tool falls back to HTML search. If Cloud Logging or Firestore audit is not enabled, the app continues normally and logs a warning only when an enabled optional integration cannot initialize.
+Local development does not require every Google service. If Custom Search is not configured, the search tool falls back to HTML search. If Cloud Logging or Firestore audit is not enabled, the app continues normally and logs a warning only when an enabled optional integration cannot initialize. If Google OAuth credentials are absent, the auth pages expose the required configuration and support a credential-free demo Google session for review.
 
 ## Why This Matters
 
@@ -29,4 +30,5 @@ ElectionGuide is a civic assistant. The Google integrations support:
 - secret safety through Secret Manager,
 - operational visibility through Cloud Logging,
 - durable state through Cloud Storage,
-- optional auditability through Firestore.
+- optional auditability through Firestore,
+- account continuity through Google Identity Services.

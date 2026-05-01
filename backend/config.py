@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     enable_firestore_audit: bool = False
     firestore_audit_collection: str = "electionguide_audit"
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:8080"]
+    frontend_url: str = "http://localhost:3000"
+    google_oauth_client_id: str | None = None
+    google_oauth_client_secret: str | None = None
+    google_oauth_redirect_uri: str | None = None
+    auth_session_ttl_hours: int = 24
 
     @property
     def gemini_model_candidates(self) -> list[str]:
@@ -54,6 +59,14 @@ class Settings(BaseSettings):
     @property
     def google_search_configured(self) -> bool:
         return bool(self.google_search_api_key and self.google_search_engine_id)
+
+    @property
+    def google_oauth_configured(self) -> bool:
+        return bool(
+            self.google_oauth_client_id
+            and self.google_oauth_client_secret
+            and self.google_oauth_redirect_uri
+        )
 
 
 settings = Settings()

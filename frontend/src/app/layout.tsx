@@ -11,12 +11,19 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "ElectionGuide — India's Civic AI",
-  description: "Accurate, sourced answers about Indian elections — voter registration, candidature, ECI rules, timelines, and more.",
+  description: "Accurate, sourced answers about Indian elections — voter registration, EVM/VVPAT, ECI rules, booth guidance, and more. Non-partisan, free, powered by Gemini.",
+  keywords: "India elections, voter registration, ECI, EVM, VVPAT, election guide, voter ID, EPIC",
+  openGraph: {
+    title: "ElectionGuide — India's Civic AI",
+    description: "Non-partisan civic intelligence platform for Indian elections. Know your vote, own your voice.",
+    type: "website",
+    locale: "en_IN",
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en-IN" suppressHydrationWarning>
       <head>
         <link
           rel="icon"
@@ -24,8 +31,24 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body className={`${inter.variable} ${inter.className} font-sans antialiased`}>
-        <ThemeProvider attribute="class" forcedTheme="dark" enableSystem={false} disableTransitionOnChange storageKey="eg-theme">
-          {children}
+        {/* Skip navigation for keyboard and assistive technology users */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-lg focus:bg-[color:var(--saffron)] focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-[color:var(--saffron-foreground)] focus:shadow-lg focus:outline-none"
+        >
+          Skip to main content
+        </a>
+
+        <ThemeProvider
+          attribute="class"
+          forcedTheme="dark"
+          enableSystem={false}
+          disableTransitionOnChange
+          storageKey="eg-theme"
+        >
+          <div id="main-content">
+            {children}
+          </div>
         </ThemeProvider>
       </body>
     </html>

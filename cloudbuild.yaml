@@ -26,6 +26,7 @@ steps:
       - run
       - deploy
       - election-guide
+      - --quiet
       - --image=us-central1-docker.pkg.dev/$PROJECT_ID/election-guide/app:$BUILD_ID
       - --region=us-central1
       - --platform=managed
@@ -39,7 +40,7 @@ steps:
       - --execution-environment=gen2
       - --add-volume=name=election-data,type=cloud-storage,bucket=election-guide-data-$PROJECT_ID
       - --add-volume-mount=volume=election-data,mount-path=/data
-      - --set-env-vars=DATABASE_URL=sqlite+aiosqlite:////data/election_guide.db,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=us-central1,GOOGLE_SECRET_NAME=GOOGLE_API_KEY,ENABLE_CLOUD_LOGGING=true
+      - --set-env-vars=DATABASE_URL=sqlite+aiosqlite:////data/election_guide.db,GCP_PROJECT_ID=$PROJECT_ID,GCP_LOCATION=us-central1,GOOGLE_SECRET_NAME=GOOGLE_API_KEY,ENABLE_CLOUD_LOGGING=true,FRONTEND_URL=https://election-guide-vqa72x3qma-uc.a.run.app,GOOGLE_OAUTH_REDIRECT_URI=https://election-guide-vqa72x3qma-uc.a.run.app/api/auth/google/callback,AUTH_SESSION_TTL_HOURS=24
       - --set-secrets=GOOGLE_API_KEY=GOOGLE_API_KEY:latest
 
 images:

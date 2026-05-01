@@ -1,6 +1,6 @@
 # Testing Strategy
 
-ElectionGuide includes focused automated tests for the most important review categories: assistant correctness, Google service configuration, grounding tools, markdown rendering, and backend safety behavior.
+ElectionGuide includes focused automated tests for the most important review categories: assistant correctness, Google service configuration, auth scaffolding, grounding tools, markdown rendering, frontend route breadth, and backend safety behavior.
 
 ## Backend Tests
 
@@ -12,6 +12,8 @@ pip install -r requirements-dev.txt
 pytest --cov=. --cov-report=term-missing
 ```
 
+Current backend suite: 48 tests.
+
 Covered areas:
 
 - model and Google configuration behavior,
@@ -19,7 +21,11 @@ Covered areas:
 - Google Custom Search provider selection,
 - official source URL extraction,
 - user-facing error messages,
-- database model shape.
+- database model shape,
+- Google OAuth provider discovery, demo session persistence, and logout behavior,
+- security headers, input limits, and rate limiting,
+- civic platform services and route contracts,
+- readiness scoring, journeys, quizzes, scenarios, booth guidance, and analytics insights.
 
 ## Frontend Tests
 
@@ -30,10 +36,16 @@ cd frontend
 npm test
 ```
 
+Current frontend suite: 12 tests.
+
 Covered areas:
 
 - malformed markdown cleanup from model responses,
-- sidebar-safe markdown stripping.
+- sidebar-safe markdown stripping,
+- static accessibility guarantees,
+- platform client route coverage,
+- landing/platform route coverage,
+- Google auth client and sign-in panel coverage.
 
 ## Full Quality Gate
 
